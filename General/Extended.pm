@@ -14,15 +14,23 @@ use Config::General 1.18;
 
 use FileHandle;
 use Carp;
-use vars qw(@ISA);
+use Exporter ();
+use vars qw(@ISA @EXPORT);
 
 # inherit new() and so on from Config::General
-@ISA = qw(Config::General);
+@ISA = qw(Config::General Exporter);
+@EXPORT = qw(obj value hash array is_hash is_array is_scalar exists keys delete configfile);
 
 use strict;
 
 
-$Config::General::Extended::VERSION = "1.5";
+$Config::General::Extended::VERSION = "1.7";
+
+
+sub new {
+  croak "Deprecated method Config::General::Extended::new() called.\n"
+       ."Use Config::General::new() instead and set the -ExtendedAccess flag.\n";
+}
 
 
 sub obj {
@@ -34,14 +42,14 @@ sub obj {
   my($this, $key) = @_;
   if (exists $this->{config}->{$key}) {
     if (!$this->{config}->{$key}) {
-      return $this->new( () ); # empty object!
+      return $this->SUPER::new( -ExtendedAccess => 1, -ConfigHash => {} ); # empty object!
     }
     else {
-      return $this->new( $this->{config}->{$key} );
+      return $this->SUPER::new( -ExtendedAccess => 1, -ConfigHash => $this->{config}->{$key} );
     }
   }
   else {
-    return $this->new( $this->{config} );
+    return $this->SUPER::new( -ExtendedAccess => 1, -ConfigHash => $this->{config} );
   }
 }
 
@@ -154,11 +162,11 @@ sub keys {
   # it contains keys (so it must be a hash!)
   #
   my($this, $key) = @_;
-  if (exists $this->{config}->{$key} && ref($this->{config}->{$key}) eq "HASH") {
-    return map { $_ } keys %{$this->{config}->{$key}};
-  }
-  elsif (!$key) {
+  if (!$key) {
     return map { $_ } keys %{$this->{config}};
+  }
+  elsif (exists $this->{config}->{$key} && ref($this->{config}->{$key}) eq "HASH") {
+    return map { $_ } keys %{$this->{config}->{$key}};
   }
   else {
     return ();
@@ -181,19 +189,21 @@ sub delete {
 }
 
 
-sub save {
-  #
-  # save the config back to disk
-  #
-  my($this,$file) = @_;
-  my $fh = new FileHandle;
-
-  if (!$file) {
-    $file = $this->{configfile};
-  }
-
-  $this->save_file($file);
-}
+#
+# removed, use save() of General.pm now
+# sub save {
+#  #
+#  # save the config back to disk
+#  #
+#  my($this,$file) = @_;
+#  my $fh = new FileHandle;
+#
+#  if (!$file) {
+#    $file = $this->{configfile};
+#  }
+#
+#  $this->save_file($file);
+# }
 
 
 sub configfile {
@@ -253,62 +263,26 @@ sub DESTROY {
 
 Config::General::Extended - Extended access to Config files
 
+
 =head1 SYNOPSIS
 
- use Config::General::Extended;
- $conf = new Config::General::Extended("rcfile");
- # or
- $conf = new Config::General::Extended(\%somehash);
+ use Config::General;
+
+ $conf = new Config::General(
+    -ConfigFile     => 'configfile',
+    -ExtendedAccess => 1
+ );
 
 =head1 DESCRIPTION
 
-This module is a subclass of B<Config::General>. You can use it if
-you want OO access to parts of your config file. The following methods
-are directly inherited from Config::General: B<new() getall()>.
+This is an internal module which makes it possible to use object
+oriented methods to access parts of your config file.
 
-Please refer to the L<Config::General>, if you want to learn about the usage
-of the two methods mentioned above. The possible format of config files supported
-by this module is also well described in L<Config::General>.
+Normally you don't call it directly.
 
 =head1 METHODS
 
 =over
-
-=item new(filename) or new(\%somehash)
-
-This method returns a B<Config::General> object (a hash blessed into "Config::General::Extended"
-namespace. All further methods must be used from that returned object. see below.
-
-Read a more detailed discussion on how to use the new() method in L<Config::General>.
-
-
-=item NoMultiOptions()
-
-This method only exists for compatibility reasons.
-Now you should set the new() flag B<-AllowMultiOptions>
-to "no".
-
-Refer to L<Config::General> for details about this method.
-
-=item getall()
-
-Returns a hash structure which represents the whole config.
-
-If you use this method, then it would be probably
-better to use the simpler module B<Config::General>. It is just mentioned here
-for completeness.
-
-
-=item save()
-
-
-Writes the current config hash back to the harddisk.
-It takes an optional argument: B<filename>. If you omit a filename, save() will
-use the filename configured by the method B<configfile()> or B<new()> (see below).
-
-B<Important>: the method save() is now superseded by B<save_file()> and B<save_string()>.
-Refer to L<Config::General> for details. You can use these new methods to save
-a config either to a string or to a file.
 
 =item configfile('filename')
 
@@ -522,7 +496,7 @@ Thomas Linden <tom@daemon.de>
 
 =head1 VERSION
 
-1.5
+1.7
 
 =cut
 

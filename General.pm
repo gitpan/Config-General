@@ -17,7 +17,7 @@ use strict;
 use Carp;
 use Exporter;
 
-$Config::General::VERSION = "1.36";
+$Config::General::VERSION = "2.02";
 
 use vars  qw(@ISA @EXPORT);
 @ISA    = qw(Exporter);
@@ -54,6 +54,12 @@ sub new {
 	      DefaultConfig         => {},
 
 	      level                 => 1,
+
+	      InterPolateVars       => 0,
+
+	      ExtendedAccess        => 0,
+
+	      parsed                => 0
 	     };
 
   # create the class instance
@@ -63,8 +69,10 @@ sub new {
   if ($#param >= 1) {
     # use of the new hash interface!
     my %conf = @param;
-    $configfile = delete $conf{-file} if(exists $conf{-file});
-    $configfile = delete $conf{-hash} if(exists $conf{-hash});
+    $configfile = delete $conf{-file} if(exists $conf{-file}); # be backwards compatible
+    $configfile = delete $conf{-ConfigFile} if(exists $conf{-ConfigFile});
+    $configfile = delete $conf{-hash} if(exists $conf{-hash}); # be backwards compatible
+    $configfile = delete $conf{-ConfigHash} if(exists $conf{-ConfigHash});
 
 
 
@@ -93,8 +101,8 @@ sub new {
 	$self->{content} = ();
       }
       delete $conf{-DefaultConfig};
+      delete $conf{-BaseHash}; # ignore BaseHash if a default one was given
     }
-
 
     # handle options which may either be true or false
     # allowing "human" logic about what is true and what is not
@@ -124,35 +132,63 @@ sub new {
   else {
     # this happens if $#param == -1,1 thus no param was given to new!
     $self->{config} = {};
-    return $self;
-  }
-
-  ### use Data::Dumper; print Dumper($self); exit;
-
-  # process as usual
-  if (exists $self->{StringContent}) {
-    # consider the supplied string as config file
-    $self->_read($self->{StringContent}, "SCALAR");
-    $self->{config} = $self->_parse($self->{DefaultConfig}, $self->{content});
-  }
-  elsif (ref($configfile) eq "HASH") {
-    # initialize with given hash
-    $self->{config} = $configfile;
     $self->{parsed} = 1;
   }
-  elsif (ref($configfile) eq "GLOB") {
-    # use the file the glob points to
-    $self->_read($configfile);
-    $self->{config} = $self->_parse($self->{DefaultConfig}, $self->{content});
+
+
+  # process as usual
+  if (!$self->{parsed}) {
+    if (exists $self->{StringContent}) {
+      # consider the supplied string as config file
+      $self->_read($self->{StringContent}, "SCALAR");
+      $self->{config} = $self->_parse($self->{DefaultConfig}, $self->{content});
+    }
+    elsif (ref($configfile) eq "HASH") {
+      # initialize with given hash
+      $self->{config} = $configfile;
+      $self->{parsed} = 1;
+    }
+    elsif (ref($configfile) eq "GLOB") {
+      # use the file the glob points to
+      $self->_read($configfile);
+      $self->{config} = $self->_parse($self->{DefaultConfig}, $self->{content});
+    }
+    else {
+      # open the file and read the contents in
+      $self->{configfile} = $configfile;
+      # look if is is an absolute path and save the basename if it is absolute
+      ($self->{configpath}) = $configfile =~ /^(\/.*)\//;
+      $self->_open($self->{configfile});
+      # now, we parse immdediately, getall simply returns the whole hash
+      $self->{config} = $self->_parse($self->{DefaultConfig}, $self->{content});
+    }
   }
-  else {
-    # open the file and read the contents in
-    $self->{configfile} = $configfile;
-    # look if is is an absolute path and save the basename if it is absolute
-    ($self->{configpath}) = $configfile =~ /^(\/.*)\//;
-    $self->_open($self->{configfile});
-    # now, we parse immdediately, getall simply returns the whole hash
-    $self->{config} = $self->_parse($self->{DefaultConfig}, $self->{content});
+
+  #
+  # Submodule handling. Parsing is already done at this point.
+  #
+  if ($self->{InterPolateVars}) {
+    eval {
+      require Config::General::Interpolated;
+    };
+    if ($@) {
+      croak $@;
+    }
+    $self->{regex}  = Config::General::Interpolated::_set_regex();
+    $self->{config} = Config::General::Interpolated::_vars($self, $self->{config}, {});
+  }
+  if ($self->{ExtendedAccess}) {
+    #
+    # we are blessing here again, to get into the ::Extended namespace
+    # for inheriting the methods available overthere, which we doesn't have.
+    #
+    bless($self, "Config::General::Extended");
+    eval {
+      require Config::General::Extended;
+    };
+    if ($@) {
+      croak $@;
+    }
   }
 
   return $self;
@@ -314,7 +350,16 @@ sub _parse {
     $_ =~ s/^\s*//;                                        # strip spaces @ end and begin
     $_ =~ s/\s*$//;
 
-    my ($option,$value) = split /\s*=\s*|\s+/, $_, 2;      # option/value assignment, = is optional
+    # my ($option,$value) = split /\s*=\s*|\s+/, $_, 2;      # option/value assignment, = is optional
+
+     my ($option,$value);
+     if (/=/) {
+       ($option,$value) = split /\s*=\s*/, $_, 2;      # option/value assignment, = is optional
+     }
+     else {
+       ($option,$value) = split /\s+/, $_, 2;          # option/value assignment, = is optional
+     }
+
     my $indichar = chr(182);                               # ¶, inserted by _open, our here-doc indicator
     $value =~ s/^$indichar// if($value);                   # a here-doc begin, remove indicator
     if ($value && $value =~ /^"/ && $value =~ /"$/) {
@@ -354,7 +399,16 @@ sub _parse {
 		delete $config->{$option};
 		push @{$config->{$option}}, $savevalue;
 	      }
-	      push @{$config->{$option}}, $this->_parse_value($option, $value); # it's already an array, just push
+	      eval {
+		# check if arrays are supported by the underlying hash
+		my $i = scalar @{$config->{$option}};
+	      };
+	      if ($@) {
+		$config->{$option} = $this->_parse_value($option, $value);
+	      }
+	      else {
+		push @{$config->{$option}}, $this->_parse_value($option, $value); # it's already an array, just push
+	      }
 	    }
 	  }
 	}
@@ -506,9 +560,7 @@ sub NoMultiOptions {
   # Since we do parsing from within new(), we must
   # call it again if one turns NoMultiOptions on!
   #
-  my($this) = @_;
-  $this->{AllowMultiOptions} = 0;
-  $this->{config} = $this->_parse({}, $this->{content});
+  croak "The NoMultiOptions() method is deprecated. Set 'AllowMultiOptions' to 'no' instead!";
 }
 
 
@@ -729,6 +781,8 @@ sub SaveConfigString {
   }
 }
 
+
+
 # keep this one
 1;
 
@@ -799,19 +853,19 @@ the following keys set:
 
 =over
 
-=item B<-file>
+=item B<-ConfigFile>
 
 A filename or a filehandle, i.e.:
 
- -file => "rcfile" or -file => \$FileHandle
+ -ConfigFile => "rcfile" or -ConfigFile => \$FileHandle
 
 
 
-=item B<-hash>
+=item B<-ConfigHash>
 
 A hash reference, which will be used as the config, i.e.:
 
- -hash => \%somehash
+ -ConfigHash => \%somehash
 
 
 
@@ -911,7 +965,7 @@ Multiple flags can be used, separated by the pipe character |.
 Well, an example will clarify things:
 
  my $conf = new Config::General(
-         -file => "rcfile",
+         -ConfigFile => "rcfile",
          -FlagBits => {
               Mode => {
                  CLEAR    => 1,
@@ -978,26 +1032,33 @@ This can be a hash reference or a simple scalar (string) of a config. This
 causes the module to preset the resulting config hash with the given values,
 which allows you to set default values for particular config options directly.
 
+This hash will be used as the 'backing hash' instead of a standard perl hash,
+which allows you to affect the way, variable storing will be done. You could, for
+example supply a tied hash, say Tie::DxHash, which preserves ordering of the
+keys in the config (which a standard perl hash won't do). Or, you could supply
+a hash tied to a DBM file to save the parsed variables to disk.
 
+There are many more things to do in tie-land, see L<tie> to get some interesting
+ideas.
+
+=item B<-InterPolateVars>
+
+If set to a true value, variable interpolation will be done on your config
+input. See L<Config::General::Interpolated> for more informations.
+
+=item B<-ExtendedAccess>
+
+If set to a true value, you can use object oriented (extended) methods to
+access the parsed config. See L<Config::General::Extended> for more informations.
 
 =back
 
-=item NoMultiOptions()
 
-This method only exists for compatibility reasons and is deprecated.
-Now you should set the parameter to the B<new()> method B<-AllowMultiOptions> to "no".
-
-see B<METHODS>.
 
 
 =item getall()
 
 Returns a hash structure which represents the whole config.
-
-
-=item save()
-
-B<Deprectated. Use save_file() instead!>
 
 
 =item save_file()
@@ -1365,7 +1426,7 @@ open included files from the directory, where the configfile resides. You need t
 the option B<-IncludeRelative> (see B<new()>) if you want that. An example:
 
  my $conf = Config::General(
-                             -file => "/etc/crypt.d/server.cfg"
+                             -ConfigFile => "/etc/crypt.d/server.cfg"
                              -IncludeRelative => 1
                            );
 
@@ -1450,7 +1511,7 @@ allowed to the B<new()> method of the standard interface.
 Example:
 
  use Config::General;
- my %config = ParseConfig(-file => "rcfile", -AutoTrue => 1);
+ my %config = ParseConfig(-ConfigFile => "rcfile", -AutoTrue => 1);
 
 
 =item B<SaveConfig()>
@@ -1474,7 +1535,7 @@ method B<save_string()> does.
 Example:
 
  use Config::General;
- my %config = ParseConfig(-file => "rcfile");
+ my %config = ParseConfig(-ConfigFile => "rcfile");
  .. # change %config something
  my $content = SaveConfigString(\%config);
 
@@ -1514,7 +1575,7 @@ Thomas Linden <tom@daemon.de>
 
 =head1 VERSION
 
-1.36
+2.02
 
 =cut
 
