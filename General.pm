@@ -6,18 +6,24 @@
 #          given file and return it as hash
 #          structure
 #
-# Copyright (c) 2000 Thomas Linden <tom@daemon.de>.
+# Copyright (c) 2000-2001 Thomas Linden <tom@daemon.de>.
 # All Rights Reserved. Std. disclaimer applies.
 # Artificial License, same as perl itself. Have fun.
 #
-# Changes from 1.19:   - added an if(exists... to new() for checking of the
-#                        existence of -AllowMultiOptions.
-#                      - use now "local $_" because it caused weird results
-#                        if a user used $_ with the module.
-# Changes from 1.18:   - you can escape "#" characters using a backslash: "\#"
-#                        which will now no more treated as a comment.
-#                      - comments inside here-documents will now remain in the
-#                        here-doc value.
+# 1.23:   - fixed bug, which removed trailing or leading " even
+#           no matching " was there.
+# 1.22:   - added a new option to new(): -LowerCaseNames, which
+#           lowercases all option-names (feature request)
+# 1.21:   - lines with just one "#" became an option array named
+#           "#" with empty entries, very weird, fixed
+# 1.20:   - added an if(exists... to new() for checking of the
+#           existence of -AllowMultiOptions.
+#         - use now "local $_" because it caused weird results
+#           if a user used $_ with the module.
+# 1.19:   - you can escape "#" characters using a backslash: "\#"
+#           which will now no more treated as a comment.
+#         - comments inside here-documents will now remain in the
+#           here-doc value.
 
 # namespace
 package Config::General;
@@ -26,7 +32,7 @@ use FileHandle;
 use strict;
 use Carp;
 
-$Config::General::VERSION = "1.20";
+$Config::General::VERSION = "1.23";
 
 sub new {
   #
@@ -48,6 +54,11 @@ sub new {
     if (exists $conf{-AllowMultiOptions} ) {
       if ($conf{-AllowMultiOptions} =~ /^no$/) {
 	$self->{NoMultiOptions} = 1;
+      }
+    }
+    if (exists $conf{-LowerCaseNames}) {
+      if ($conf{-LowerCaseNames}) {
+	$self->{LowerCaseNames} = 1;
       }
     }
   }
@@ -200,8 +211,10 @@ sub _parse {
     my ($option,$value) = split /\s*=\s*|\s+/, $_, 2;      # option/value assignment, = is optional
     my $indichar = chr(182);                               # ¶, inserted by _open, our here-doc indicator
     $value =~ s/^$indichar// if($value);                   # a here-doc begin, remove indicator
-    $value =~ s/^"// if($value);                           # remove leading and trailing "
-    $value =~ s/"$// if($value);
+    if ($value && $value =~ /^"/ && $value =~ /"$/) {
+      $value =~ s/^"//;                                    # remove leading and trailing "
+      $value =~ s/"$//;
+    }
     if (!$block) {                                         # not inside a block @ the moment
       if (/^<([^\/]+?.*?)>$/) {                            # look if it is a block
 	$this->{level} += 1;
@@ -210,6 +223,7 @@ sub _parse {
 	if ($blockname) {
 	  $block = $grab;
 	}
+	$block = lc($block) if $this->{LowerCaseNames};    # only for blocks lc(), if configured via new()
 	undef @newcontent;
 	next;
       }
@@ -217,6 +231,7 @@ sub _parse {
 	croak "EndBlock \"<\/$1>\" has no StartBlock statement (level: $this->{level}, chunk $chunk)!\n";
       }
       else {                                               # insert key/value pair into actual node
+	$option = lc($option) if $this->{LowerCaseNames};
 	if ($this->{NoMultiOptions}) {                     # configurable via special method ::NoMultiOptions()
 	  if (exists $config->{$option}) {
 	    croak "Option $config->{$option} occurs more than once (level: $this->{level}, chunk $chunk)!\n";
@@ -244,7 +259,7 @@ sub _parse {
     }
     elsif (/^<\/(.+?)>$/) {
       if ($block_level) {                                  # this endblock is not the one we are searching for, decrement and push
-	$block_level--;                                    # if it is 0 the the endblock was the one we searched for, see below 
+	$block_level--;                                    # if it is 0, then the endblock was the one we searched for, see below
 	push @newcontent, $_;                              # push onto new content stack
       }
       else {                                               # calling myself recursively, end of $block reached, $block_level is 0
@@ -386,8 +401,9 @@ Possible ways to call B<new()>:
  $conf = new Config::General(\%somehash);
 
  $conf = new Config::General(
-                       -file => "rcfile",
+                       -file              => "rcfile",
                        -AllowMultiOptions => "no"
+                       -LowerCaseNames    => "yes"
                             );
 
  $conf = new Config::General(
@@ -410,6 +426,9 @@ still supported. Possible parameters are:
     -hash               - a hash reference.
     -AllowMultiOptions  - if the value is "no", then multiple
                           identical options are disallowed.
+    -LowerCaseNames     - if true (1 or "yes") then all options found
+                          in the config will be converted to lowercase.
+                          This allows you to provide case-in-sensitive configs
 
 
 =item NoMultiOptions()
@@ -542,6 +561,32 @@ The hash which the method B<getall> returns look like that:
           'user'   => 'hans'
         };
 
+If you have turned on B<-LowerCaseNames> (see new()) then blocks as in the
+following example:
+
+ <Dir>
+   <AttriBUTES>
+     Owner  root
+   </attributes>
+ </dir>
+
+would produce the following hash structure:
+
+ $VAR1 = {
+          'dir' => {
+                    'attributes' => {
+                                     'owner  => "root",
+                                    }
+                   }
+         };
+
+As you can see, the keys inside the config hash are normalized.
+
+Please note, that the above config block would result in a
+valid hash structure, even if B<-LowerCaseNames> is not set!
+This is because I<Config::General> does not
+use the blocknames to check if a block ends, instead it uses an internal
+state counter, which indicates a block end.
 
 If the module cannot find an end-block statement, then this block will be ignored.
 
@@ -740,7 +785,7 @@ Thomas Linden <tom@daemon.de>
 
 =head1 VERSION
 
-1.20
+1.22
 
 =cut
 
