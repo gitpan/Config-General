@@ -18,7 +18,7 @@ use strict;
 use Carp;
 use Exporter;
 
-$Config::General::VERSION = "1.30";
+$Config::General::VERSION = "1.29";
 
 use vars  qw(@ISA @EXPORT);
 @ISA    = qw(Exporter);
@@ -1425,7 +1425,7 @@ Thomas Linden <tom@daemon.de>
 
 =head1 VERSION
 
-1.30
+1.29
 
 =cut
 
