@@ -23,7 +23,7 @@ use vars qw(@ISA @EXPORT);
 use strict;
 
 
-$Config::General::Extended::VERSION = "2.01";
+$Config::General::Extended::VERSION = "2.00";
 
 
 sub new {
@@ -39,14 +39,10 @@ sub obj {
   # or an empty object if the content of $key is empty.
   #
   my($this, $key) = @_;
-
-  # just create the empty object, just in case
-  my $empty = $this->SUPER::new( -ExtendedAccess => 1, -ConfigHash => {}, %{$this->{Params}} );
-
   if (exists $this->{config}->{$key}) {
     if (!$this->{config}->{$key}) {
       # be cool, create an empty object!
-      return $empty
+      return $this->SUPER::new( -ExtendedAccess => 1, -ConfigHash => {}, %{$this->{Params}} );
     }
     elsif (ref($this->{config}->{$key}) eq "ARRAY") {
       my @objlist;
@@ -77,13 +73,13 @@ sub obj {
       }
       else {
 	# be cool, create an empty object!
-	return $empty;
+	return $this->SUPER::new( -ExtendedAccess => 1, -ConfigHash => {}, %{$this->{Params}} );
       }
     }
   }
   else {
     # even return an empty object if $key does not exist
-    return $empty;
+    return $this->SUPER::new( -ExtendedAccess => 1, -ConfigHash => {}, %{$this->{Params}} );
   }
 }
 
@@ -416,27 +412,6 @@ operations, i.e.:
 
 See the discussion on B<AUTOLOAD METHODS> below.
 
-If the key points to a list of hashes, a list of objects will be
-returned. Given the following example config:
-
- <option>
-   name = max
- </option>
- <option>
-   name = bea
- </option>
-
-you could write code like this to access the list the OOP way:
-
- my $objlist = $conf->obj("option");
- foreach my $option (@{$objlist}) {
-  print $option->name;
- }
-
-Please note that the list will be returned as a reference to an array.
-
-Empty elements or non-hash elements of the list, if any, will be skipped.
-
 =item hash('key')
 
 This method returns a hash(if it B<is> one!) from the config which is referenced by
@@ -589,7 +564,7 @@ Thomas Linden <tom@daemon.de>
 
 =head1 VERSION
 
-2.01
+2.00
 
 =cut
 
