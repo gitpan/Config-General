@@ -8,7 +8,7 @@
 #
 
 package Config::General::Interpolated;
-$Config::General::Interpolated::VERSION = "2.13";
+$Config::General::Interpolated::VERSION = "2.14";
 
 use strict;
 use Carp;
@@ -72,11 +72,14 @@ sub _interpolate  {
   # which will be replaced after interpolation with the original quotes
   # fixes bug rt#35766
   my %quotes;
-  $value =~ s/(\'[^\']+?\')/
-    my $key = "QUOTE" . ($quote_counter++) . "QUOTE";
-    $quotes{ $key } = $1;
-    $key;
-  /gex;
+
+  if(! $this->{AllowSingleQuoteInterpolation} ) {
+    $value =~ s/(\'[^\']+?\')/
+      my $key = "QUOTE" . ($quote_counter++) . "QUOTE";
+      $quotes{ $key } = $1;
+      $key;
+    /gex;
+  }
 
   $value =~ s{$this->{regex}}{
     my $con = $1;
@@ -124,7 +127,7 @@ sub _interpolate_hash {
   my ($this, $config) = @_;
 
   # bugfix rt.cpan.org#46184, moved code from _interpolate() to here.
-  if ($this->{InterPolateEnv} && defined(%ENV)) {
+  if ($this->{InterPolateEnv}) {
     # may lead to vulnerabilities, by default flag turned off
     for my $key (keys %ENV){
       $config->{__stack}->{$key}=$ENV{$key};
@@ -347,7 +350,7 @@ See L<http://www.perl.com/perl/misc/Artistic.html>
 
 =head1 VERSION
 
-2.13
+2.14
 
 =cut
 
