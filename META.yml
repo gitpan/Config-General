@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Config-General
-version:            2.55
+version:            2.56
 abstract:           ~
 author:  []
 license:            perl
